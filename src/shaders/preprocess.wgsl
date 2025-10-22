@@ -57,9 +57,24 @@ struct Gaussian {
 
 struct Splat {
     //TODO: store information for 2D splat rendering
+    pos_ndc: vec3<f32>, // Splat position in ndc (covariance?).
+    size: f32,
+    color: vec3<f32>;
+    opacity: f32; // Might need to decide if this gets pack w/ pos later...
+    depth: f32; // For sorting by depth later.
 };
 
 //TODO: bind your data here
+@group(0) @binding(0)
+var<storage, read_write> splatBuffer: array<Splat>;
+
+@group(1) @binding(0)
+var<uniform> camera: CameraUniforms;
+
+// Storage buffer for gaussians.
+@group(1) @binding(0)
+var<storage, read> gaussians: array<Gaussian>;
+
 @group(2) @binding(0)
 var<storage, read_write> sort_infos: SortInfos;
 @group(2) @binding(1)
@@ -112,6 +127,33 @@ fn computeColorFromSH(dir: vec3<f32>, v_idx: u32, sh_deg: u32) -> vec3<f32> {
 fn preprocess(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(num_workgroups) wgs: vec3<u32>) {
     let idx = gid.x;
     //TODO: set up pipeline as described in instruction
+
+    // Length check for gaussians buffer.
+    if(idx >= arrayLength(&gaussians)){
+        return;
+    }
+
+    // Unpack Gaussian data.
+    let currGaussian = gaussians[idx];
+
+    let xy = unpack2x16float(currGaussian.pos_opacity[0]);
+    let z_opacity = unpack2x16float(currGaussian.pos_opacity[1]);
+    let position = vec3<f32>(xy, z_opacity.x); 
+    let alpha = f32(z_opacity.y);
+
+    // Project position to NDC.
+    let clipPos = camera.view * camera.proj * vec4<f32>(position, 1.0);
+    let posNdc = clipPos.xyz/clipPos.w;
+
+    // Check if outside bounds, if yes, then cull.
+    if (any(posNdc.xy < vec2<f32>(-1.2)) || any(posNdc.xy > vec2<f32>(1.2)) || posNdc.z < 0.0 || posNdc.z > 1.0) {
+        return;
+    }
+
+    // Compute 3D covariance.
+
+    // Store position into corresponding splat struct.
+    splat[idx].pos_ndc = posNdc.xy;
 
     let keys_per_dispatch = workgroupSize * sortKeyPerThread; 
     // increment DispatchIndirect.dispatchx each time you reach limit for one dispatch of keys
