@@ -5,7 +5,7 @@ import { get_sorter, c_histogram_block_rows, C } from '../sort/sort';
 import { Renderer } from './renderer';
 
 export interface GaussianRenderer extends Renderer {
-
+  render_settings_buffer: GPUBuffer
 }
 
 // Utility to create GPU buffers
@@ -36,6 +36,14 @@ export default function get_renderer(
 
   const nulling_data = new Uint32Array([0]);
 
+  // Create null buffer.
+  const null_buffer = createBuffer(
+    device,
+    'null_buffer',
+    4,
+    GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST, nulling_data
+  );
+
   // Create indirect buffer.
   const indirect_buffer = createBuffer(
     device,
@@ -44,6 +52,40 @@ export default function get_renderer(
     GPUBufferUsage.COPY_DST | GPUBufferUsage.INDIRECT,
     new Uint32Array([6, pc.num_points, 0, 0])
   );
+
+  // Create splat buffer.
+  const splatBufferSize = pc.num_points * 64;
+
+  const splat_buffer = createBuffer(
+    device,
+    'splat_buffer',
+    splatBufferSize,
+    GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST
+  )
+
+  // Render settings buffer?
+  const renderSettings_size = new Float32Array([1.0, pc.sh_deg, 0.0, 0.0]);
+  const render_settings_buffer = createBuffer(
+    device,
+    'render_settings',
+    renderSettings_size.byteLength,
+    GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+    renderSettings_size
+  )
+
+  const dummyVertexBuffer = device.createBuffer({
+    label: "dummy_vertex",
+    size: 4 * 2 * Float32Array.BYTES_PER_ELEMENT, // 4 vertices * 2 floats
+    usage: GPUBufferUsage.VERTEX,
+    mappedAtCreation: true
+  });
+  new Float32Array(dummyVertexBuffer.getMappedRange()).set([
+    -1, -1,
+    1, -1,
+    -1, 1,
+    1, 1
+  ]);
+  dummyVertexBuffer.unmap();
 
   // ===============================================
   //    Create Compute Pipeline and Bind Groups
@@ -61,9 +103,25 @@ export default function get_renderer(
     },
   });
 
+  // Holds buffers for splat, camera+gaussian, etc.
+  const compute_bind_group = device.createBindGroup({
+    label: 'Compute Bind Group',
+    layout: preprocess_pipeline.getBindGroupLayout(0),
+    entries: [
+      { binding: 0, resource: { buffer: camera_buffer } },
+      { binding: 1, resource: { buffer: pc.gaussian_3d_buffer } },
+      { binding: 2, resource: { buffer: splat_buffer } },
+      { binding: 3, resource: { buffer: render_settings_buffer } },
+      { binding: 4, resource: { buffer: pc.sh_buffer } },
+    ],
+  });
+
+
+  // Buffers for cam and gaussians in preprocess pipeline b/c used in preprocess shader.
+
   const sort_bind_group = device.createBindGroup({
     label: 'sort',
-    layout: preprocess_pipeline.getBindGroupLayout(2),
+    layout: preprocess_pipeline.getBindGroupLayout(1),
     entries: [
       { binding: 0, resource: { buffer: sorter.sort_info_buffer } },
       { binding: 1, resource: { buffer: sorter.ping_pong[0].sort_depths_buffer } },
@@ -71,7 +129,6 @@ export default function get_renderer(
       { binding: 3, resource: { buffer: sorter.sort_dispatch_indirect_buffer } },
     ],
   });
-
 
   // ===============================================
   //    Create Render Pipeline and Bind Groups
@@ -85,16 +142,17 @@ export default function get_renderer(
         code: renderWGSL
       }),
       entryPoint: "vs_main",
-      buffers: [{
-        arrayStride: 2 * Float32Array.BYTES_PER_ELEMENT,
-        stepMode: "vertex",
-        attributes: [{
-          shaderLocation: 0,
-          offset: 0,
-          format: 'float32x2'
+      buffers: []
+      // buffers: [{
+      //   arrayStride: 2 * Float32Array.BYTES_PER_ELEMENT,
+      //   stepMode: "vertex",
+      //   attributes: [{
+      //     shaderLocation: 0,
+      //     offset: 0,
+      //     format: 'float32x2'
 
-        }],
-      }]
+      //   }],
+      // }]
     },
     fragment: {
       module: device.createShaderModule({
@@ -108,35 +166,100 @@ export default function get_renderer(
     }
   });
 
+  // create the render pipeline bind group for all other resources
+  const render_pipeline_bind_group = device.createBindGroup({
+    label: 'render_pipeline_bind_group',
+    layout: render_pipeline.getBindGroupLayout(0),
+    entries: [
+
+      // declare a new entry for the splat data buffer
+      {
+        binding: 0,
+        resource: {
+          buffer: splat_buffer,
+        },
+      },
+    ],
+  });
+
   // ===============================================
   //    Command Encoder Functions
   // ===============================================
+  // Compute pass first for preprocessing (?).
+  const compute_pass = (encoder: GPUCommandEncoder) => {
+    const preprocess_compute_pass = encoder.beginComputePass();
 
+    // Bind preprocess.
+    preprocess_compute_pass.setPipeline(preprocess_pipeline);
+
+    // Set bind groups.
+    preprocess_compute_pass.setBindGroup(0, compute_bind_group);
+    preprocess_compute_pass.setBindGroup(1, sort_bind_group);
+
+    // Dispatch work groups.
+    preprocess_compute_pass.dispatchWorkgroups(Math.ceil(pc.num_points / C.histogram_wg_size));
+
+    // End preprocess pass.
+    preprocess_compute_pass.end();
+  };
+
+  const render_pass = (encoder: GPUCommandEncoder, texture_view: GPUTextureView) => {
+    const gaussian_render_pass = encoder.beginRenderPass({
+      label: 'gaussian render pass',
+      colorAttachments: [
+        {
+          view: texture_view,
+          loadOp: "clear",
+          storeOp: "store",
+          clearValue: [
+            0.0, 0.0, 0.0, 1.0
+          ]
+        }]
+    });
+    // Somewhere here set pipeline and draw indirect buffer.
+    gaussian_render_pass.setPipeline(render_pipeline);
+    gaussian_render_pass.setBindGroup(0, render_pipeline_bind_group);
+    gaussian_render_pass.drawIndirect(indirect_buffer, 0);
+    gaussian_render_pass.setVertexBuffer(0, dummyVertexBuffer);
+    gaussian_render_pass.end();
+  };
+
+  // Render pass next.
 
   // ===============================================
   //    Return Render Object
   // ===============================================
   return {
     frame: (encoder: GPUCommandEncoder, texture_view: GPUTextureView) => {
+      encoder.copyBufferToBuffer(
+        null_buffer, 0,
+        sorter.sort_info_buffer, 0,
+        4
+      );
+      encoder.copyBufferToBuffer(
+        null_buffer, 0,
+        sorter.sort_dispatch_indirect_buffer, 0,
+        4
+      );
+
+      // Preprocess first.
+      compute_pass(encoder);
+
       sorter.sort(encoder);
+
+      encoder.copyBufferToBuffer(
+        sorter.sort_info_buffer, // src
+        0,                       // srcOffset (bytes)
+        indirect_buffer,         // dst
+        4,                       // dstOffset = instanceCount slot (bytes)
+        4                        // size in bytes (1 u32)
+      );
 
       // New render pass.
       // We return the render pass.
-      const render_pass = encoder.beginRenderPass({
-        label: "render pass",
-        colorAttachments: [
-          {
-            view: texture_view,
-            loadOp: "clear",
-            storeOp: "store",
-            clearValue: [
-              0.0, 0.0, 0.0, 1.0
-            ]
-          }]
-      });
-      // End render pass.
-      render_pass.end();
+      render_pass(encoder, texture_view);
     },
     camera_buffer,
+    render_settings_buffer
   };
 }

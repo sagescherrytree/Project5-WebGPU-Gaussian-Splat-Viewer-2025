@@ -59,29 +59,32 @@ struct Splat {
     //TODO: store information for 2D splat rendering
     pos_ndc: vec3<f32>, // Splat position in ndc (covariance?).
     size: f32,
-    color: vec3<f32>;
-    opacity: f32; // Might need to decide if this gets pack w/ pos later...
-    depth: f32; // For sorting by depth later.
+    color: vec3<f32>,
+    opacity: f32, // Might need to decide if this gets pack w/ pos later...
+    depth: f32, // For sorting by depth later.
 };
 
 //TODO: bind your data here
+
 @group(0) @binding(0)
-var<storage, read_write> splatBuffer: array<Splat>;
-
-@group(1) @binding(0)
 var<uniform> camera: CameraUniforms;
-
 // Storage buffer for gaussians.
-@group(1) @binding(0)
+@group(0) @binding(1)
 var<storage, read> gaussians: array<Gaussian>;
+@group(0) @binding(2)
+var<storage, read_write> splatBuffer: array<Splat>;
+@group(0) @binding(3) 
+var<uniform> settings: RenderSettings;
+@group(0) @binding(4) 
+var<storage, read> sh_coeffs: array<vec3<f32>>;
 
-@group(2) @binding(0)
+@group(1) @binding(0)
 var<storage, read_write> sort_infos: SortInfos;
-@group(2) @binding(1)
+@group(1) @binding(1)
 var<storage, read_write> sort_depths : array<u32>;
-@group(2) @binding(2)
+@group(1) @binding(2)
 var<storage, read_write> sort_indices : array<u32>;
-@group(2) @binding(3)
+@group(1) @binding(3)
 var<storage, read_write> sort_dispatch: DispatchIndirect;
 
 /// reads the ith sh coef from the storage buffer 
@@ -127,7 +130,13 @@ fn computeColorFromSH(dir: vec3<f32>, v_idx: u32, sh_deg: u32) -> vec3<f32> {
 fn preprocess(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(num_workgroups) wgs: vec3<u32>) {
     let idx = gid.x;
     //TODO: set up pipeline as described in instruction
+    let tempSettings = settings.gaussian_scaling;
+    let tempSH = sh_coeffs[0];
+    let tempSortInfo = atomicAdd(&sort_infos.keys_size, 0u);
 
+    let sortDepth = sort_depths[0];                             // binding 1
+    let sortIndices = sort_indices[0];                            // binding 2
+    let sortDispatch = atomicAdd(&sort_dispatch.dispatch_x, 0u);  // binding 3
     // Length check for gaussians buffer.
     if(idx >= arrayLength(&gaussians)){
         return;
@@ -142,7 +151,7 @@ fn preprocess(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(num_workgr
     let alpha = f32(z_opacity.y);
 
     // Project position to NDC.
-    let clipPos = camera.view * camera.proj * vec4<f32>(position, 1.0);
+    let clipPos = camera.proj * camera.view * vec4<f32>(position, 1.0);
     let posNdc = clipPos.xyz/clipPos.w;
 
     // Check if outside bounds, if yes, then cull.
@@ -153,7 +162,7 @@ fn preprocess(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(num_workgr
     // Compute 3D covariance.
 
     // Store position into corresponding splat struct.
-    splat[idx].pos_ndc = posNdc.xy;
+    splatBuffer[idx].pos_ndc = posNdc.xyz;
 
     let keys_per_dispatch = workgroupSize * sortKeyPerThread; 
     // increment DispatchIndirect.dispatchx each time you reach limit for one dispatch of keys
