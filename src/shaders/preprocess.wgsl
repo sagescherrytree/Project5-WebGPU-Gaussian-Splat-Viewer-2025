@@ -57,11 +57,10 @@ struct Gaussian {
 
 struct Splat {
     //TODO: store information for 2D splat rendering
-    pos_ndc: vec3<f32>, // Splat position in ndc (covariance?).
-    size: f32,
+    pos_ndc: u32,
+    size: u32,
     color: vec3<f32>,
-    opacity: f32, // Might need to decide if this gets pack w/ pos later...
-    depth: f32, // For sorting by depth later.
+    depth_opacity: u32
 };
 
 //TODO: bind your data here
@@ -144,6 +143,7 @@ fn preprocess(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(num_workgr
     let alpha = f32(z_opacity.y);
 
     // Project position to NDC.
+    let viewPos = (camera.view * vec4<f32>(position, 1.0f)).xyz;
     let clipPos = camera.proj * camera.view * vec4<f32>(position, 1.0);
     let posNdc = clipPos.xyz/clipPos.w;
 
@@ -169,7 +169,7 @@ fn preprocess(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(num_workgr
     let scaleXY = unpack2x16float(currGaussian.scale[0]);
     let scaleZW = unpack2x16float(currGaussian.scale[1]);
 
-    let scale = exp(vec3f(
+    let scale = exp(vec3<f32>(
         scaleXY.x,
         scaleXY.y,
         scaleZW.x
@@ -275,9 +275,10 @@ fn preprocess(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(num_workgr
     let lambda2 = mid - sqrt(max(0.1f, mid * mid - determinant));
     let radius = ceil(3.0f * sqrt(max(lambda1, lambda2)));
 
-    
+    // Calculate size (please work...).
+    let size = vec2<f32>(radius, radius) * settings.gaussian_scaling / camera.viewport;
 
-    let renderSettings = settings.gaussian_scaling;
+    let scaleSettings = settings.gaussian_scaling;
     let testingSH = sh_coeffs[0];
     let sortIdx = atomicAdd(&sort_infos.keys_size, 1u);
 
@@ -286,13 +287,25 @@ fn preprocess(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(num_workgr
     let sortDispatch = atomicAdd(&sort_dispatch.dispatch_x, 0u); 
 
     // Pack stuff into new splat struct, to render in gaussian.wgsl.
+    let packedPosNdc = pack2x16float(posNdc.xy);
+    let packedSize = pack2x16float(size);
 
-    // Update splat struct.
-    splatBuffer[sortIdx].pos_ndc = posNdc.xyz;
-    splatBuffer[sortIdx].size = radius * settings.gaussian_scaling;
-    splatBuffer[sortIdx].depth = posNdc.z;
-    splatBuffer[sortIdx].opacity = alpha;
-    splatBuffer[sortIdx].color = computeColorFromSH(normalize(position), idx, u32(settings.sh_deg));
+    // Compute conic.
+    let conic = vec3<f32>(
+        covar_2D.z / determinant,
+        -covar_2D.y / determinant,
+        covar_2D.x / determinant,
+    );
+
+    let splatCol = computeColorFromSH(normalize(position), idx, u32(settings.sh_deg));
+
+    splatBuffer[sortIdx].pos_ndc = packedPosNdc;
+    splatBuffer[sortIdx].size = packedSize;
+    splatBuffer[sortIdx].color = splatCol;
+    splatBuffer[sortIdx].depth_opacity = pack2x16float(vec2<f32>(alpha, posNdc.z));
+
+    sort_indices[sortIdx] = sortIdx;
+    sort_depths[sortIdx]= bitcast<u32>(100.0 - viewPos.z);
 
     let keys_per_dispatch = workgroupSize * sortKeyPerThread; 
     // increment DispatchIndirect.dispatchx each time you reach limit for one dispatch of keys

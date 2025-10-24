@@ -102,9 +102,6 @@ export default function get_renderer(
     ],
   });
 
-
-  // Buffers for cam and gaussians in preprocess pipeline b/c used in preprocess shader.
-
   const sort_bind_group = device.createBindGroup({
     label: 'sort',
     layout: preprocess_pipeline.getBindGroupLayout(1),
@@ -129,16 +126,6 @@ export default function get_renderer(
       }),
       entryPoint: "vs_main",
       buffers: []
-      // buffers: [{
-      //   arrayStride: 2 * Float32Array.BYTES_PER_ELEMENT,
-      //   stepMode: "vertex",
-      //   attributes: [{
-      //     shaderLocation: 0,
-      //     offset: 0,
-      //     format: 'float32x2'
-
-      //   }],
-      // }]
     },
     fragment: {
       module: device.createShaderModule({
@@ -146,7 +133,19 @@ export default function get_renderer(
         code: renderWGSL
       }),
       targets: [{
-        format: presentation_format
+        format: presentation_format,
+        blend: {
+          color: {
+            srcFactor: "src-alpha",
+            dstFactor: "one-minus-src-alpha",
+            operation: "add"
+          },
+          alpha: {
+            srcFactor: "one",
+            dstFactor: "one-minus-src-alpha",
+            operation: "add"
+          }
+        },
       }],
       entryPoint: "fs_main"
     }
@@ -159,12 +158,9 @@ export default function get_renderer(
     entries: [
 
       // declare a new entry for the splat data buffer
-      {
-        binding: 0,
-        resource: {
-          buffer: splat_buffer,
-        },
-      },
+      { binding: 0, resource: { buffer: splat_buffer, } },
+      { binding: 1, resource: { buffer: sorter.ping_pong[0].sort_indices_buffer } },
+      { binding: 2, resource: { buffer: camera_buffer } },
     ],
   });
 
@@ -233,11 +229,11 @@ export default function get_renderer(
       sorter.sort(encoder);
 
       encoder.copyBufferToBuffer(
-        sorter.sort_info_buffer, // src
-        0,                       // srcOffset (bytes)
-        indirect_buffer,         // dst
-        4,                       // dstOffset = instanceCount slot (bytes)
-        4                        // size in bytes (1 u32)
+        sorter.sort_info_buffer,
+        0,
+        indirect_buffer,
+        4,
+        4
       );
 
       // New render pass.
