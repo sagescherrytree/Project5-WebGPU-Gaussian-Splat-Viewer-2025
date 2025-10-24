@@ -154,7 +154,129 @@ fn preprocess(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(num_workgr
 
     // Compute 3D covariance.
 
-    // For testing.
+    // Unpack rotation.
+    let rotationXY = unpack2x16float(currGaussian.rot[0]);
+    let rotationZW = unpack2x16float(currGaussian.rot[1]);
+
+    let rotation = vec4f(
+        rotationXY.x,
+        rotationXY.y,
+        rotationZW.x,
+        rotationZW.y
+    );
+
+    // Unpack scale.
+    let scaleXY = unpack2x16float(currGaussian.scale[0]);
+    let scaleZW = unpack2x16float(currGaussian.scale[1]);
+
+    let scale = exp(vec3f(
+        scaleXY.x,
+        scaleXY.y,
+        scaleZW.x
+    ));
+
+    // Compute R matrix.
+    let nq = normalize(rotation);
+
+    let R = mat3x3<f32>(
+        vec3<f32>(
+            1.0 - 2.0*(nq.y*nq.y + nq.z*nq.z),
+            2.0*(nq.x*nq.y + nq.z*nq.w),
+            2.0*(nq.x*nq.z - nq.y*nq.w)
+        ),
+        vec3<f32>(
+            2.0*(nq.x*nq.y - nq.z*nq.w),
+            1.0 - 2.0*(nq.x*nq.x + nq.z*nq.z),
+            2.0*(nq.y*nq.z + nq.x*nq.w)
+        ),
+        vec3<f32>(
+            2.0*(nq.x*nq.z + nq.y*nq.w),
+            2.0*(nq.y*nq.z - nq.x*nq.w),
+            1.0 - 2.0*(nq.x*nq.x + nq.y*nq.y)
+        )
+    );
+
+    // Construct S matrix.
+    let S = mat3x3<f32>(
+        vec3<f32>(scale.x, 0.0, 0.0),
+        vec3<f32>(0.0, scale.y, 0.0),
+        vec3<f32>(0.0, 0.0, scale.z)
+    );
+
+    // Compute M matrix.
+    let M = S * R;
+
+    // Compute 3D covariance matrix.
+    let covar_3D_M = transpose(M) * M;
+
+    let covar_3D = array<f32,6>(
+        covar_3D_M[0][0],
+        covar_3D_M[0][1],
+        covar_3D_M[0][2],
+        covar_3D_M[1][1],
+        covar_3D_M[1][2],
+        covar_3D_M[2][2]
+    );
+
+    // Compute t vector.
+    var t = (camera.view * vec4<f32>(position, 1.0)).xyz;
+    let limx = 0.65 * camera.viewport.x / camera.focal.x;
+    let limy = 0.65 * camera.viewport.y / camera.focal.y;
+    let txtz = t.x / t.z;
+    let tytz = t.y / t.z;
+    t.x = min(limx, max(-limx, txtz)) * t.z;
+    t.y = min(limy, max(-limy, tytz)) * t.z;
+
+    // Compute Jacobian.
+    let J = mat3x3<f32>(
+        camera.focal.x / t.z, 0.0f, -(camera.focal.x * t.x) / (t.z * t.z),
+        0.0f, camera.focal.y / t.z, -(camera.focal.y * t.y) / (t.z * t.z),
+        0.0f, 0.0f, 0.0f
+    );
+
+    // Compute W matrix.
+    let W = transpose(mat3x3<f32>(
+        camera.view[0].xyz, 
+        camera.view[1].xyz, 
+        camera.view[2].xyz
+    ));
+
+    // Comute T matrix.
+    let T = W * J;
+
+    // Get V matrix.
+    let V = mat3x3<f32>(
+        vec3<f32>(covar_3D[0], covar_3D[1], covar_3D[2]),
+        vec3<f32>(covar_3D[1], covar_3D[3], covar_3D[4]),
+        vec3<f32>(covar_3D[2], covar_3D[4], covar_3D[5])
+    );
+
+    // Calculate 2D covariance matrix.
+    var covar_2D_M = transpose(T) * transpose(V) * T;
+    covar_2D_M[0][0] += 0.3f;
+    covar_2D_M[1][1] += 0.3f;
+
+    // Compute 2D covariance.
+    let covar_2D = vec3<f32>(
+        covar_2D_M[0][0],
+        covar_2D_M[0][1],
+        covar_2D_M[1][1]
+    );
+
+    // Calculate determinant.
+    var determinant = covar_2D.x * covar_2D.z - (covar_2D.y * covar_2D.y);
+    if (determinant == 0.0) {
+        return;
+    }
+
+    // Calculate radius.
+    let mid = (covar_2D.x + covar_2D.z) * 0.5f;
+    let lambda1 = mid + sqrt(max(0.1f, mid * mid - determinant));
+    let lambda2 = mid - sqrt(max(0.1f, mid * mid - determinant));
+    let radius = ceil(3.0f * sqrt(max(lambda1, lambda2)));
+
+    
+
     let renderSettings = settings.gaussian_scaling;
     let testingSH = sh_coeffs[0];
     let sortIdx = atomicAdd(&sort_infos.keys_size, 1u);
@@ -165,8 +287,12 @@ fn preprocess(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(num_workgr
 
     // Pack stuff into new splat struct, to render in gaussian.wgsl.
 
-    // Store position into corresponding splat struct.
+    // Update splat struct.
     splatBuffer[sortIdx].pos_ndc = posNdc.xyz;
+    splatBuffer[sortIdx].size = radius * settings.gaussian_scaling;
+    splatBuffer[sortIdx].depth = posNdc.z;
+    splatBuffer[sortIdx].opacity = alpha;
+    splatBuffer[sortIdx].color = computeColorFromSH(normalize(position), idx, u32(settings.sh_deg));
 
     let keys_per_dispatch = workgroupSize * sortKeyPerThread; 
     // increment DispatchIndirect.dispatchx each time you reach limit for one dispatch of keys
