@@ -130,13 +130,6 @@ fn computeColorFromSH(dir: vec3<f32>, v_idx: u32, sh_deg: u32) -> vec3<f32> {
 fn preprocess(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(num_workgroups) wgs: vec3<u32>) {
     let idx = gid.x;
     //TODO: set up pipeline as described in instruction
-    let tempSettings = settings.gaussian_scaling;
-    let tempSH = sh_coeffs[0];
-    let tempSortInfo = atomicAdd(&sort_infos.keys_size, 0u);
-
-    let sortDepth = sort_depths[0];                             // binding 1
-    let sortIndices = sort_indices[0];                            // binding 2
-    let sortDispatch = atomicAdd(&sort_dispatch.dispatch_x, 0u);  // binding 3
     // Length check for gaussians buffer.
     if(idx >= arrayLength(&gaussians)){
         return;
@@ -161,9 +154,23 @@ fn preprocess(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(num_workgr
 
     // Compute 3D covariance.
 
+    // For testing.
+    let renderSettings = settings.gaussian_scaling;
+    let testingSH = sh_coeffs[0];
+    let sortIdx = atomicAdd(&sort_infos.keys_size, 1u);
+
+    let sortDepth = sort_depths[0];
+    let sortIndices = sort_indices[0]; 
+    let sortDispatch = atomicAdd(&sort_dispatch.dispatch_x, 0u); 
+
+    // Pack stuff into new splat struct, to render in gaussian.wgsl.
+
     // Store position into corresponding splat struct.
-    splatBuffer[idx].pos_ndc = posNdc.xyz;
+    splatBuffer[sortIdx].pos_ndc = posNdc.xyz;
 
     let keys_per_dispatch = workgroupSize * sortKeyPerThread; 
     // increment DispatchIndirect.dispatchx each time you reach limit for one dispatch of keys
+    if (sortIdx % keys_per_dispatch == 0){
+        atomicAdd(&sort_dispatch.dispatch_x, 1);
+    }
 }

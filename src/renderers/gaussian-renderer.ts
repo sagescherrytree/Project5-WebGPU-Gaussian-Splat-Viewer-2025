@@ -73,20 +73,6 @@ export default function get_renderer(
     renderSettings_size
   )
 
-  const dummyVertexBuffer = device.createBuffer({
-    label: "dummy_vertex",
-    size: 4 * 2 * Float32Array.BYTES_PER_ELEMENT, // 4 vertices * 2 floats
-    usage: GPUBufferUsage.VERTEX,
-    mappedAtCreation: true
-  });
-  new Float32Array(dummyVertexBuffer.getMappedRange()).set([
-    -1, -1,
-    1, -1,
-    -1, 1,
-    1, 1
-  ]);
-  dummyVertexBuffer.unmap();
-
   // ===============================================
   //    Create Compute Pipeline and Bind Groups
   // ===============================================
@@ -220,7 +206,6 @@ export default function get_renderer(
     gaussian_render_pass.setPipeline(render_pipeline);
     gaussian_render_pass.setBindGroup(0, render_pipeline_bind_group);
     gaussian_render_pass.drawIndirect(indirect_buffer, 0);
-    gaussian_render_pass.setVertexBuffer(0, dummyVertexBuffer);
     gaussian_render_pass.end();
   };
 
@@ -257,6 +242,22 @@ export default function get_renderer(
 
       // New render pass.
       // We return the render pass.
+
+      // debug: force 1 instance at center and write a test splat into splat_buffer
+      device.queue.writeBuffer(indirect_buffer, 4, new Uint32Array([1]));
+
+      // write a test Splat at offset 0 (ensure layout matches wgsl Splat)
+      const test = new Float32Array([
+        0.0, 0.0, 0.0, // pos_ndc
+        10.0,           // size
+        1.0, 0.0, 0.0, // color
+        1.0,           // opacity
+        0.5            // depth
+      ]);
+      // Convert Float32Array to ArrayBuffer sized correctly (splat struct padding = 64 bytes)
+      const splatBytes = new ArrayBuffer(64);
+      new Float32Array(splatBytes).set(test);
+      device.queue.writeBuffer(splat_buffer, 0, splatBytes);
       render_pass(encoder, texture_view);
     },
     camera_buffer,
