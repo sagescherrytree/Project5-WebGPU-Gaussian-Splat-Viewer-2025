@@ -2,6 +2,8 @@ struct VertexOutput {
     @builtin(position) position: vec4<f32>,
     //TODO: information passed from vertex shader to fragment shader
     @location(0) v_color: vec3<f32>,
+    @location(1) v_conic_opacity: vec4<f32>,
+    @location(2) v_center: vec2<f32>
 };
 
 // Camera uniform struct defines.
@@ -72,13 +74,32 @@ fn vs_main(
 
     let finalPos = pos + vec4<f32>(offset, 0.0, 0.0);
 
+    // Pass out VertexOutput params for frag shader.
+    let conicOpacity = vec4<f32>(conicXY.xy, conicZOpacity.xy);
+
     var out: VertexOutput;
     out.position = finalPos;
     out.v_color = col;
+    out.v_conic_opacity = conicOpacity;
+    out.v_center = vec2<f32>(posXY);
     return out;
 }
 
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
-    return vec4<f32>(in.v_color, 1.0);
+    // Calculate ndc position again.
+    var posNdc = (in.position.xy / camera.viewport) * 2.0 - 1.0;
+    posNdc.y = -posNdc.y;
+
+    // Offset in ndc.
+    var offset = (posNdc.xy - in.v_center.xy) * camera.viewport * 0.5;
+    var power = in.v_conic_opacity.x * pow(offset.x, 2.0) + in.v_conic_opacity.z * pow(offset.y, 2.0f) * -0.5 - in.v_conic_opacity.y * offset.x * offset.y;
+
+    if (power > 0.0){
+        return vec4<f32>(0.0);
+    }
+
+    let alpha = min(0.99, in.v_conic_opacity.w * exp(power));
+
+    return vec4<f32>(in.v_color * alpha, 1.0);
 }

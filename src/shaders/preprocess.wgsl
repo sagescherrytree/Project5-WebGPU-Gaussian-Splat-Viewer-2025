@@ -76,7 +76,7 @@ var<storage, read_write> splatBuffer: array<Splat>;
 @group(0) @binding(3) 
 var<uniform> settings: RenderSettings;
 @group(0) @binding(4) 
-var<storage, read> sh_coeffs: array<vec3<f32>>;
+var<storage, read> sh_coeffs: array<u32>;
 
 @group(1) @binding(0)
 var<storage, read_write> sort_infos: SortInfos;
@@ -90,7 +90,14 @@ var<storage, read_write> sort_dispatch: DispatchIndirect;
 /// reads the ith sh coef from the storage buffer 
 fn sh_coef(splat_idx: u32, c_idx: u32) -> vec3<f32> {
     //TODO: access your binded sh_coeff, see load.ts for how it is stored
-    return vec3<f32>(0.0);
+    let base_index = splat_idx * 24u + (c_idx / 2u) * 3u + (c_idx % 2u);
+    let color01 = unpack2x16float(sh_coeffs[base_index + 0u]);
+    let color23 = unpack2x16float(sh_coeffs[base_index + 1u]);
+    if ((c_idx & 1u) == 0u) {
+        return vec3<f32>(color01.x, color01.y, color23.x);
+    } else {
+        return vec3<f32>(color01.y, color23.x, color23.y);
+    }
 }
 
 // spherical harmonics evaluation with Condon–Shortley phase
