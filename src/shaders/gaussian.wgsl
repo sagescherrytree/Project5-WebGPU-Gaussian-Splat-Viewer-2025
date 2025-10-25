@@ -20,7 +20,8 @@ struct Splat {
     pos_ndc: u32,
     size: u32,
     color: vec3<f32>,
-    depth_opacity: u32
+    conic_opacity0: u32,
+    conic_opacity1: u32
 };
 
 // Read in splats from storage buffer that was set up in preprocess.
@@ -56,17 +57,19 @@ fn vs_main(
 
     let posXY = unpack2x16float(currSplat.pos_ndc);
     let size = unpack2x16float(currSplat.size);
-    let depth_opacity = unpack2x16float(currSplat.depth_opacity);
 
-    var pos = vec4<f32>(posXY.x, posXY.y, depth_opacity.y, 1.0);
+    let conicXY = unpack2x16float(currSplat.conic_opacity0);
+    let conicZOpacity = unpack2x16float(currSplat.conic_opacity1);
+
+    var pos = vec4<f32>(posXY.x, posXY.y, conicZOpacity.x, 1.0);
     var col = currSplat.color;
-    let opacity = depth_opacity.x;  
-    let depth = depth_opacity.y;
 
     let offset = QUAD_OFFSETS[vertex_index] * f32(size.x);
 
+    let finalPos = pos + vec4<f32>(offset, 0.0, 0.0);
+
     var out: VertexOutput;
-    out.position = pos;
+    out.position = finalPos;
     out.v_color = col;
     return out;
 }

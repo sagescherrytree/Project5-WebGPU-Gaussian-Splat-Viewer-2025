@@ -60,7 +60,8 @@ struct Splat {
     pos_ndc: u32,
     size: u32,
     color: vec3<f32>,
-    depth_opacity: u32
+    conic_opacity0: u32,
+    conic_opacity1: u32
 };
 
 //TODO: bind your data here
@@ -290,6 +291,7 @@ fn preprocess(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(num_workgr
     let packedPosNdc = pack2x16float(posNdc.xy);
     let packedSize = pack2x16float(size);
 
+
     // Compute conic.
     let conic = vec3<f32>(
         covar_2D.z / determinant,
@@ -297,12 +299,19 @@ fn preprocess(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(num_workgr
         covar_2D.x / determinant,
     );
 
+    let opacity_f = 1.0 / (1.0 + exp(-alpha));
+
     let splatCol = computeColorFromSH(normalize(position), idx, u32(settings.sh_deg));
 
     splatBuffer[sortIdx].pos_ndc = packedPosNdc;
     splatBuffer[sortIdx].size = packedSize;
     splatBuffer[sortIdx].color = splatCol;
-    splatBuffer[sortIdx].depth_opacity = pack2x16float(vec2<f32>(alpha, posNdc.z));
+    
+    let packedConicXY: u32 = pack2x16float(conic.xy);
+    let packedConicZOpacity: u32 = pack2x16float(vec2<f32>(conic.z, opacity_f));
+
+    splatBuffer[sortIdx].conic_opacity0 = packedConicXY;
+    splatBuffer[sortIdx].conic_opacity1 = packedConicZOpacity;
 
     sort_indices[sortIdx] = sortIdx;
     sort_depths[sortIdx]= bitcast<u32>(100.0 - viewPos.z);
