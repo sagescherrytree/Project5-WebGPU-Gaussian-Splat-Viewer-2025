@@ -49,8 +49,9 @@ fn vs_main(
 ) -> VertexOutput {
     //TODO: reconstruct 2D quad based on information from splat, pass 
 
-    // Read in current splat from splats[instance_index].
+    // Obtain sorted index.
     let sortedIndex = sort_indices[instance_index];
+    // Read in current splat from sortedIndex.
     let currSplat = splats[sortedIndex];
 
     let dummy = camera.view[0][0];
@@ -61,8 +62,11 @@ fn vs_main(
     let conicXY = unpack2x16float(currSplat.conic_opacity0);
     let conicZOpacity = unpack2x16float(currSplat.conic_opacity1);
 
+    let depth_variance = conicZOpacity.x;
+    let opacity = conicZOpacity.y;
+
     var pos = vec4<f32>(posXY.x, posXY.y, conicZOpacity.x, 1.0);
-    var col = currSplat.color;
+    var col = vec3<f32>(currSplat.color.r, currSplat.color.g, clamp(depth_variance, 0.0, 1.0));
 
     let offset = QUAD_OFFSETS[vertex_index] * f32(size.x);
 
