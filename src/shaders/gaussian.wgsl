@@ -97,11 +97,11 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 
     let power = -0.5 * (A * offset.x * offset.x + 2.0 * B * offset.x * offset.y + C * offset.y * offset.y);
 
-    if (power < -20.0) {
-        discard; // negligible contribution
+    if (power > 0.0) {
+        return vec4<f32>(0.0);
     }
 
     let alpha = clamp(in.v_conic_opacity.w * exp(power), 0.0, 1.0);
 
-    return vec4<f32>(in.v_color * alpha, 1.0);
+    return vec4<f32>(in.v_color * alpha, alpha);
 }

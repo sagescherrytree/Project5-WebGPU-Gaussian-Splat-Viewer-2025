@@ -93,7 +93,7 @@ fn sh_coef(splat_idx: u32, c_idx: u32) -> vec3<f32> {
     let base_index = splat_idx * 24u + (c_idx / 2u) * 3u + (c_idx % 2u);
     let color01 = unpack2x16float(sh_coeffs[base_index + 0u]);
     let color23 = unpack2x16float(sh_coeffs[base_index + 1u]);
-    if ((c_idx & 1u) == 0u) {
+    if (c_idx % 2u == 0u) {
         return vec3<f32>(color01.x, color01.y, color23.x);
     } else {
         return vec3<f32>(color01.y, color23.x, color23.y);
@@ -163,14 +163,14 @@ fn preprocess(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(num_workgr
     // Compute 3D covariance.
 
     // Unpack rotation.
-    let rotationXY = unpack2x16float(currGaussian.rot[0]);
-    let rotationZW = unpack2x16float(currGaussian.rot[1]);
+    let rotationWX = unpack2x16float(currGaussian.rot[0]);
+    let rotationYZ = unpack2x16float(currGaussian.rot[1]);
 
     let rotation = vec4f(
-        rotationXY.x,
-        rotationXY.y,
-        rotationZW.x,
-        rotationZW.y
+        rotationWX.x,
+        rotationWX.y,
+        rotationYZ.x,
+        rotationYZ.y
     );
 
     // Unpack scale.
@@ -183,32 +183,25 @@ fn preprocess(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(num_workgr
         scaleZW.x
     ));
 
-    // Compute R matrix.
-    let nq = normalize(rotation);
+    let r = rotation.x;
+    let x = rotation.y;
+    let y = rotation.z;
+    let z = rotation.w;
 
+    // Compute R matrix.
     let R = mat3x3<f32>(
-        vec3<f32>(
-            1.0 - 2.0*(nq.y*nq.y + nq.z*nq.z),
-            2.0*(nq.x*nq.y + nq.z*nq.w),
-            2.0*(nq.x*nq.z - nq.y*nq.w)
-        ),
-        vec3<f32>(
-            2.0*(nq.x*nq.y - nq.z*nq.w),
-            1.0 - 2.0*(nq.x*nq.x + nq.z*nq.z),
-            2.0*(nq.y*nq.z + nq.x*nq.w)
-        ),
-        vec3<f32>(
-            2.0*(nq.x*nq.z + nq.y*nq.w),
-            2.0*(nq.y*nq.z - nq.x*nq.w),
-            1.0 - 2.0*(nq.x*nq.x + nq.y*nq.y)
-        )
+        1.0 - 2.0 * (y * y + z * z), 2.0 * (x * y - r * z), 2.0 * (x * z + r * y),
+        2.0 * (x * y + r * z), 1.0 - 2.0 * (x * x + z * z), 2.0 * (y * z - r * x),
+        2.0 * (x * z - r * y), 2.0 * (y * z + r * x), 1.0 - 2.0 * (x * x + y * y)
     );
+
+    let scaleSettings = settings.gaussian_scaling;
 
     // Construct S matrix.
     let S = mat3x3<f32>(
-        vec3<f32>(scale.x, 0.0, 0.0),
-        vec3<f32>(0.0, scale.y, 0.0),
-        vec3<f32>(0.0, 0.0, scale.z)
+        vec3<f32>(scale.x * scaleSettings, 0.0, 0.0),
+        vec3<f32>(0.0, scale.y * scaleSettings, 0.0),
+        vec3<f32>(0.0, 0.0, scale.z * scaleSettings)
     );
 
     // Compute M matrix.
@@ -272,7 +265,7 @@ fn preprocess(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(num_workgr
     );
 
     // Calculate determinant.
-    var determinant = covar_2D.x * covar_2D.z - (covar_2D.y * covar_2D.y);
+    var determinant = covar_2D.x * covar_2D.z - covar_2D.y * covar_2D.y;
     if (determinant == 0.0) {
         return;
     }
@@ -286,7 +279,6 @@ fn preprocess(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(num_workgr
     // Calculate size (please work...).
     let size = vec2<f32>(radius, radius) / camera.viewport;
 
-    let scaleSettings = settings.gaussian_scaling;
     let testingSH = sh_coeffs[0];
     let sortIdx = atomicAdd(&sort_infos.keys_size, 1u);
 
@@ -307,10 +299,15 @@ fn preprocess(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(num_workgr
 
     let opacity_f = 1.0 / (1.0 + exp(-alpha));
 
-    let splatCol = computeColorFromSH(normalize(position), idx, u32(settings.sh_deg));
+    let cam_pos = camera.view_inv[3].xyz;
+
+    let splatCol = computeColorFromSH(normalize(cam_pos - position), idx, u32(settings.sh_deg));
 
     splatBuffer[sortIdx].pos_ndc = packedPosNdc;
     splatBuffer[sortIdx].size = packedSize;
+
+    // let debug_color = vec3<f32>(abs(posNdc.x), abs(posNdc.y), posNdc.z); 
+    // splatBuffer[sortIdx].color = vec3<f32>(radius / 10.0, 0.0, 0.0);
     splatBuffer[sortIdx].color = splatCol;
     
     let packedConicXY: u32 = pack2x16float(conic.xy);

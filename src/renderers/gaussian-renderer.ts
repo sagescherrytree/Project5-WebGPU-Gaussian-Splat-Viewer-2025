@@ -135,16 +135,8 @@ export default function get_renderer(
       targets: [{
         format: presentation_format,
         blend: {
-          color: {
-            srcFactor: "src-alpha",
-            dstFactor: "one-minus-src-alpha",
-            operation: "add"
-          },
-          alpha: {
-            srcFactor: "one",
-            dstFactor: "one-minus-src-alpha",
-            operation: "add"
-          }
+          color: { srcFactor: "one", dstFactor: "one-minus-src-alpha", operation: "add" },
+          alpha: { srcFactor: "one", dstFactor: "one-minus-src-alpha", operation: "add" },
         },
       }],
       entryPoint: "fs_main"
