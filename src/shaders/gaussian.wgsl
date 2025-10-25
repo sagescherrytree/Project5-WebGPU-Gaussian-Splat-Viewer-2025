@@ -55,9 +55,7 @@ fn vs_main(
     let sortedIndex = sort_indices[instance_index];
     // Read in current splat from sortedIndex.
     let currSplat = splats[sortedIndex];
-
-    let dummy = camera.view[0][0];
-
+    
     let posXY = unpack2x16float(currSplat.pos_ndc);
     let size = unpack2x16float(currSplat.size);
 
@@ -67,12 +65,12 @@ fn vs_main(
     let depth_variance = conicZOpacity.x;
     let opacity = conicZOpacity.y;
 
-    var pos = vec4<f32>(posXY.x, posXY.y, conicZOpacity.x, 1.0);
-    var col = vec3<f32>(currSplat.color.r, currSplat.color.g, clamp(depth_variance, 0.0, 1.0));
+    var pos = vec4<f32>(posXY, 0.0, 1.0);
+    var col = currSplat.color;
 
-    let offset = QUAD_OFFSETS[vertex_index] * f32(size.x);
+    let offset = QUAD_OFFSETS[vertex_index] * size;
 
-    let finalPos = pos + vec4<f32>(offset, 0.0, 0.0);
+    let finalPos = vec4<f32>(pos.xy + offset, pos.z, pos.w);
 
     // Pass out VertexOutput params for frag shader.
     let conicOpacity = vec4<f32>(conicXY.xy, conicZOpacity.xy);
@@ -92,14 +90,18 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     posNdc.y = -posNdc.y;
 
     // Offset in ndc.
-    var offset = (posNdc.xy - in.v_center.xy) * camera.viewport * 0.5;
-    var power = in.v_conic_opacity.x * pow(offset.x, 2.0) + in.v_conic_opacity.z * pow(offset.y, 2.0f) * -0.5 - in.v_conic_opacity.y * offset.x * offset.y;
+    let offset = posNdc.xy - in.v_center.xy;
+    let A = in.v_conic_opacity.x;
+    let B = in.v_conic_opacity.y;
+    let C = in.v_conic_opacity.z;
 
-    if (power > 0.0){
-        return vec4<f32>(0.0);
+    let power = -0.5 * (A * offset.x * offset.x + 2.0 * B * offset.x * offset.y + C * offset.y * offset.y);
+
+    if (power < -20.0) {
+        discard; // negligible contribution
     }
 
-    let alpha = min(0.99, in.v_conic_opacity.w * exp(power));
+    let alpha = clamp(in.v_conic_opacity.w * exp(power), 0.0, 1.0);
 
     return vec4<f32>(in.v_color * alpha, 1.0);
 }

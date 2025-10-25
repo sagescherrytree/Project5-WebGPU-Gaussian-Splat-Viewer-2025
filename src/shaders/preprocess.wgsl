@@ -284,7 +284,7 @@ fn preprocess(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(num_workgr
     let radius = ceil(3.0f * sqrt(max(lambda1, lambda2)));
 
     // Calculate size (please work...).
-    let size = vec2<f32>(radius, radius) * settings.gaussian_scaling / camera.viewport;
+    let size = vec2<f32>(radius, radius) / camera.viewport;
 
     let scaleSettings = settings.gaussian_scaling;
     let testingSH = sh_coeffs[0];
@@ -297,7 +297,6 @@ fn preprocess(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(num_workgr
     // Pack stuff into new splat struct, to render in gaussian.wgsl.
     let packedPosNdc = pack2x16float(posNdc.xy);
     let packedSize = pack2x16float(size);
-
 
     // Compute conic.
     let conic = vec3<f32>(
