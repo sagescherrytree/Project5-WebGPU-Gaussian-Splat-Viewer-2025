@@ -293,7 +293,7 @@ fn preprocess(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(num_workgr
     // Compute conic.
     let conic = vec3<f32>(
         covar_2D.z / determinant,
-        -covar_2D.y / determinant,
+        covar_2D.y / determinant,
         covar_2D.x / determinant,
     );
 
