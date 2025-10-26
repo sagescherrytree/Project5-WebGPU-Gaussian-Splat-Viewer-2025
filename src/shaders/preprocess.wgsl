@@ -277,7 +277,7 @@ fn preprocess(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(num_workgr
     let radius = ceil(3.0f * sqrt(max(lambda1, lambda2)));
 
     // Calculate size (please work...).
-    let size = vec2<f32>(radius, radius) / camera.viewport;
+    let size = vec2<f32>(2.0 * radius, 2.0 * radius) / camera.viewport;
 
     let testingSH = sh_coeffs[0];
     let sortIdx = atomicAdd(&sort_infos.keys_size, 1u);

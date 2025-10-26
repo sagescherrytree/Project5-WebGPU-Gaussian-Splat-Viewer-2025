@@ -91,11 +91,13 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 
     // Offset in ndc.
     let offset = posNdc.xy - in.v_center.xy;
+    let offset_px = offset * camera.viewport * 0.5; 
     let A = in.v_conic_opacity.x;
     let B = in.v_conic_opacity.y;
     let C = in.v_conic_opacity.z;
 
-    let power = -0.5 * (A * offset.x * offset.x + 2.0 * B * offset.x * offset.y + C * offset.y * offset.y);
+    var power = A * offset_px.x * offset_px.x + C * offset_px.y * offset_px.y + 2.0 * B * offset_px.x * offset_px.y;
+    power *= -0.5;
 
     if (power > 0.0) {
         return vec4<f32>(0.0);
