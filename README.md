@@ -126,6 +126,12 @@ These above images were some debugging that I did for testing methods of passing
 
 These two results are from when I was testing out the quad size calculations... I do not recall what precisely I fixed to obtain either result, but for a while my quad colour was too dark, resulting in the right image. Finally, the image on the left is a visualisation method to test each quad's scale size.
 
+| ![](images/HUGEHUGEBIKE.png) |
+|:--:|
+| Rotation matrix off |
+
+This final bug, for which I think to be the most visually interesting, is a rotation bug in which the sign of one of the elements of the covariance vector was flipped. Although wrong, this result reminds me of a colour pencil sketch, which gives me interesting thoughts regarding stylising a Gaussian splat.
+
 ### Credits
 
 - [Vite](https://vitejs.dev/)
